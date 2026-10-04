@@ -6,7 +6,7 @@
 
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
-import type { SendResult } from '../types/index.js';
+import type { Account, SendResult } from '../types/index.js';
 import type ImapService from './imap.service.js';
 
 export default class SmtpService {
@@ -29,6 +29,8 @@ export default class SmtpService {
       cc?: string[];
       bcc?: string[];
       html?: boolean;
+      from?: string;
+      fromName?: string;
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
@@ -37,7 +39,7 @@ export default class SmtpService {
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: this.senderAddress(account, options),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       bcc: options.bcc?.join(', '),
@@ -63,6 +65,8 @@ export default class SmtpService {
       body: string;
       replyAll?: boolean;
       html?: boolean;
+      from?: string;
+      fromName?: string;
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
@@ -77,13 +81,13 @@ export default class SmtpService {
     if (options.replyAll) {
       // Add all original To recipients except ourselves
       original.to
-        .filter((addr) => addr.address !== account.email)
+        .filter((addr) => addr.address !== account.email && addr.address !== options.from)
         .forEach((addr) => {
           to.push(addr.address);
         });
       // Add CC recipients except ourselves
       (original.cc ?? [])
-        .filter((addr) => addr.address !== account.email)
+        .filter((addr) => addr.address !== account.email && addr.address !== options.from)
         .forEach((addr) => {
           cc.push(addr.address);
         });
@@ -99,7 +103,7 @@ export default class SmtpService {
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: this.senderAddress(account, options),
       to: to.join(', '),
       cc: cc.length > 0 ? cc.join(', ') : undefined,
       subject,
@@ -126,6 +130,8 @@ export default class SmtpService {
       to: string[];
       body?: string;
       cc?: string[];
+      from?: string;
+      fromName?: string;
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
@@ -154,7 +160,7 @@ export default class SmtpService {
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: this.senderAddress(account, options),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       subject,
@@ -164,6 +170,13 @@ export default class SmtpService {
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
+    };
+  }
+
+  private senderAddress(account: Account, options: { from?: string; fromName?: string }) {
+    return {
+      address: options.from ?? account.email,
+      name: options.fromName ?? account.fullName ?? '',
     };
   }
 
