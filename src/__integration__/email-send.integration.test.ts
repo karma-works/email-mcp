@@ -75,9 +75,94 @@ describe('Email Send Operations', () => {
     });
   });
 
+  describe('sender aliases', () => {
+    it.each(['send', 'reply', 'forward'] as const)(
+      'delivers %s mail from an alias using the existing account',
+      async (operation) => {
+        const subject = `Alias ${operation} delivery`;
+        const sender = { from: 'alias@example.com', fromName: 'Alias Team' };
+        if (operation === 'send') {
+          await services.smtpService.sendEmail(TEST_ACCOUNT_NAME, {
+            ...sender,
+            to: ['bob@localhost'],
+            subject,
+            body: 'Sent with an alias',
+          });
+        } else {
+          await services.smtpService.sendEmail('integration-2', {
+            to: ['test@localhost'],
+            subject,
+            body: 'Original message',
+          });
+          await waitForDelivery();
+          const original = await services.imapService.listEmails(TEST_ACCOUNT_NAME, { subject });
+          const emailId = original.items[0].id;
+          if (operation === 'reply') {
+            await services.smtpService.replyToEmail(TEST_ACCOUNT_NAME, {
+              ...sender,
+              emailId,
+              body: 'Alias reply',
+            });
+          } else {
+            await services.smtpService.forwardEmail(TEST_ACCOUNT_NAME, {
+              ...sender,
+              emailId,
+              to: ['bob@localhost'],
+              body: 'Alias forward',
+            });
+          }
+        }
+        await waitForDelivery();
+        const delivered = await services.imapService.listEmails('integration-2', {
+          subject:
+            operation === 'reply'
+              ? `Re: ${subject}`
+              : operation === 'forward'
+                ? `Fwd: ${subject}`
+                : subject,
+        });
+        expect(delivered.items).toHaveLength(1);
+        const email = await services.imapService.getEmail('integration-2', delivered.items[0].id);
+        expect(email.from).toEqual({ address: 'alias@example.com', name: 'Alias Team' });
+      },
+    );
+  });
+
   // ---------------------------------------------------------------------------
   // reply_email
   // ---------------------------------------------------------------------------
+
+  describe('reply-all with an alias', () => {
+    it('excludes the login address and selected alias from delivered recipients', async () => {
+      await services.smtpService.sendEmail('integration-2', {
+        to: ['test@localhost', 'alias@example.com', 'alice@localhost'],
+        cc: ['alias@example.com', 'test@localhost'],
+        subject: 'Alias reply-all original',
+        body: 'Please reply to everyone else',
+      });
+      await waitForDelivery();
+      const original = await services.imapService.listEmails(TEST_ACCOUNT_NAME, {
+        subject: 'Alias reply-all original',
+      });
+      await services.smtpService.replyToEmail(TEST_ACCOUNT_NAME, {
+        emailId: original.items[0].id,
+        from: 'alias@example.com',
+        fromName: 'Alias Team',
+        body: 'Replying as the alias',
+        replyAll: true,
+      });
+      await waitForDelivery();
+      const delivered = await services.imapService.listEmails('integration-2', {
+        subject: 'Re: Alias reply-all original',
+      });
+      const email = await services.imapService.getEmail('integration-2', delivered.items[0].id);
+      expect(email.to.map((address) => address.address)).toEqual([
+        'bob@localhost',
+        'alice@localhost',
+      ]);
+      expect(email.cc ?? []).toEqual([]);
+    });
+  });
 
   describe('replyToEmail', () => {
     it('should reply to an email with proper threading', async () => {

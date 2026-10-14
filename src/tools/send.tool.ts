@@ -2,30 +2,46 @@
  * MCP tools: send_email, reply_email, forward_email
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
 import { validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
+import { formatSentCopy } from './sent-copy.js';
 
 export default function registerSendTools(server: McpServer, smtpService: SmtpService): void {
   // ---------------------------------------------------------------------------
   // send_email
   // ---------------------------------------------------------------------------
-  server.tool(
+  server.registerTool(
     'send_email',
-    'Send a new email. Supports plain text or HTML body, CC, and BCC.',
     {
-      account: z.string().describe('Account name from list_accounts'),
-      to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
-      subject: z.string().describe('Email subject'),
-      body: z.string().describe('Email body content'),
-      cc: z.array(z.string().email()).optional().describe('CC recipients'),
-      bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
-      html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
+      title: 'Send email',
+      description:
+        'Send a new email. Supports plain text or HTML body, CC, BCC, and sender aliases.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
+        to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
+        subject: z.string().describe('Email subject'),
+        body: z.string().describe('Email body content'),
+        cc: z.array(z.string().email()).optional().describe('CC recipients'),
+        bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
+        html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
       try {
         validateInputLength(params.subject, 998, 'Subject');
@@ -41,7 +57,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}`,
+              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}${formatSentCopy(result.sentCopy)}`,
             },
           ],
         };
@@ -70,18 +86,33 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   // reply_email
   // ---------------------------------------------------------------------------
-  server.tool(
+  server.registerTool(
     'reply_email',
-    'Reply to an email with proper threading (In-Reply-To & References headers). Use get_email first to read the original.',
     {
-      account: z.string().describe('Account name from list_accounts'),
-      emailId: z.string().describe('Email ID to reply to (from list_emails or get_email)'),
-      mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
-      body: z.string().describe('Reply body content'),
-      replyAll: z.boolean().default(false).describe('Reply to all recipients'),
-      html: z.boolean().default(false).describe('Send as HTML'),
+      title: 'Reply email',
+      description:
+        'Reply to an email with proper threading (In-Reply-To & References headers). Use get_email first to read the original.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
+        emailId: z.string().describe('Email ID to reply to (from list_emails or get_email)'),
+        mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
+        body: z.string().describe('Reply body content'),
+        replyAll: z.boolean().default(false).describe('Reply to all recipients'),
+        html: z.boolean().default(false).describe('Send as HTML'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
       try {
         const result = await smtpService.replyToEmail(params.account, params);
@@ -95,7 +126,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Reply sent successfully!\nMessage-ID: ${result.messageId}`,
+              text: `✅ Reply sent successfully!\nMessage-ID: ${result.messageId}${formatSentCopy(result.sentCopy)}`,
             },
           ],
         };
@@ -124,18 +155,33 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   // forward_email
   // ---------------------------------------------------------------------------
-  server.tool(
+  server.registerTool(
     'forward_email',
-    'Forward an email to new recipients with optional additional message. Original email is quoted below.',
     {
-      account: z.string().describe('Account name from list_accounts'),
-      emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
-      mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
-      to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
-      body: z.string().optional().describe('Additional message above the forwarded content'),
-      cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      title: 'Forward email',
+      description:
+        'Forward an email to new recipients with optional additional message. Original email is quoted below.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
+        emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
+        mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
+        to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
+        body: z.string().optional().describe('Additional message above the forwarded content'),
+        cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
       try {
         const result = await smtpService.forwardEmail(params.account, params);
@@ -149,7 +195,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email forwarded successfully!\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}`,
+              text: `✅ Email forwarded successfully!\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}${formatSentCopy(result.sentCopy)}`,
             },
           ],
         };
