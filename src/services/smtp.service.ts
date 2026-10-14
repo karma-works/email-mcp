@@ -4,10 +4,16 @@
  * No MCP dependency — fully unit-testable.
  */
 
+import { randomUUID } from 'node:crypto';
+import type { SendMailOptions } from 'nodemailer';
+import MailComposer from 'nodemailer/lib/mail-composer';
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
-import type { Account, SendResult } from '../types/index.js';
+import type { Account, AccountConfig, SendResult, SentCopyResult } from '../types/index.js';
 import type ImapService from './imap.service.js';
+
+/** SMTP hosts that store a Sent copy themselves; appending would duplicate it. */
+const SERVER_SAVES_SENT = [/(^|\.)gmail\.com$/i, /(^|\.)office365\.com$/i, /(^|\.)outlook\.com$/i];
 
 export default class SmtpService {
   constructor(
@@ -36,9 +42,7 @@ export default class SmtpService {
     this.checkRateLimit(accountName);
 
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
+    return this.deliver(accountName, account, {
       from: this.senderAddress(account, options),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
@@ -46,11 +50,6 @@ export default class SmtpService {
       subject: options.subject,
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -100,9 +99,7 @@ export default class SmtpService {
       ? original.subject
       : `Re: ${original.subject}`;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
+    return this.deliver(accountName, account, {
       from: this.senderAddress(account, options),
       to: to.join(', '),
       cc: cc.length > 0 ? cc.join(', ') : undefined,
@@ -111,11 +108,6 @@ export default class SmtpService {
       references: references.join(' '),
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -157,20 +149,13 @@ export default class SmtpService {
     const originalBody = original.bodyText ?? original.bodyHtml ?? '';
     const fullBody = (options.body ?? '') + forwardHeader + originalBody;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
+    return this.deliver(accountName, account, {
       from: this.senderAddress(account, options),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       subject,
       text: fullBody,
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   private senderAddress(account: Account, options: { from?: string; fromName?: string }) {
@@ -208,12 +193,11 @@ export default class SmtpService {
     );
 
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
 
     const to = draft.to.map((a) => a.address).join(', ');
     const cc = draft.cc?.map((a) => a.address).join(', ');
 
-    const result = await transport.sendMail({
+    const result = await this.deliver(accountName, account, {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to,
       cc,
@@ -226,9 +210,66 @@ export default class SmtpService {
     // Delete the draft after successful send
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);
 
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Delivery and Sent copy
+  // -------------------------------------------------------------------------
+
+  /**
+   * Send via SMTP, then store the same message in the Sent folder.
+   * SMTP does not do that by itself; mail clients do it after sending.
+   */
+  private async deliver(
+    accountName: string,
+    account: AccountConfig,
+    mail: SendMailOptions,
+  ): Promise<SendResult> {
+    const message: SendMailOptions = {
+      ...mail,
+      messageId: mail.messageId ?? SmtpService.newMessageId(mail.from, account.email),
+      date: mail.date ?? new Date(),
     };
+
+    const transport = await this.connections.getSmtpTransport(accountName);
+    const result = await transport.sendMail(message);
+    const sentCopy = await this.saveSentCopy(accountName, account, message);
+
+    return {
+      messageId: result.messageId ?? String(message.messageId),
+      status: 'sent',
+      sentCopy,
+    };
+  }
+
+  private async saveSentCopy(
+    accountName: string,
+    account: AccountConfig,
+    message: SendMailOptions,
+  ): Promise<SentCopyResult> {
+    if (SERVER_SAVES_SENT.some((host) => host.test(account.smtp.host))) {
+      return { status: 'skipped', reason: `${account.smtp.host} stores sent mail itself` };
+    }
+    try {
+      const node = new MailComposer(message).compile();
+      // The sender's own copy keeps Bcc, as mail clients do.
+      node.keepBcc = true;
+      const raw = await node.build();
+      const mailbox = await this.imapService.appendToSent(accountName, raw);
+      return mailbox
+        ? { status: 'saved', mailbox }
+        : { status: 'skipped', reason: 'no Sent folder found' };
+    } catch (err) {
+      return { status: 'failed', error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private static newMessageId(from: SendMailOptions['from'], fallback: string): string {
+    let address = fallback;
+    if (typeof from === 'string') address = from;
+    else if (from && !Array.isArray(from)) address = from.address ?? fallback;
+    const domain = /@([^>\s]+)>?\s*$/.exec(address)?.[1] ?? 'localhost';
+    return `<${randomUUID()}@${domain}>`;
   }
 }

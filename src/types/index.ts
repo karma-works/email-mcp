@@ -244,7 +244,14 @@ export interface Email extends EmailMeta {
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
+  /** Outcome of storing a copy in the Sent folder; the send itself succeeded either way. */
+  sentCopy?: SentCopyResult;
 }
+
+export type SentCopyResult =
+  | { status: 'saved'; mailbox: string }
+  | { status: 'skipped'; reason: string }
+  | { status: 'failed'; error: string };
 
 export interface PaginatedResult<T> {
   items: T[];

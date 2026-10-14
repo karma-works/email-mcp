@@ -32,6 +32,9 @@ import { detectLabelStrategy } from './label-strategy.js';
 // Helpers (must be defined before ImapService)
 // ---------------------------------------------------------------------------
 
+/** Fallback names for servers that do not advertise the \Sent special-use flag. */
+const SENT_FOLDER_NAMES = new Set(['sent', 'sent items', 'sent messages', 'gesendet']);
+
 function parseAddress(addr: { name?: string; address?: string } | undefined): EmailAddress {
   return {
     name: addr?.name ?? undefined,
@@ -1276,6 +1279,24 @@ export default class ImapService {
     } finally {
       lock.release();
     }
+  }
+
+  /**
+   * Store a copy of a sent message in the account's Sent folder.
+   * Returns the folder path, or null if the account has no Sent folder.
+   */
+  async appendToSent(accountName: string, rawMessage: Buffer): Promise<string | null> {
+    const client = await this.connections.getImapClient(accountName);
+    const mailboxes = await client.list();
+    const sent =
+      mailboxes.find((mb) => mb.specialUse === '\\Sent') ??
+      mailboxes.find((mb) => SENT_FOLDER_NAMES.has(mb.name.toLowerCase()));
+    if (!sent) return null;
+
+    await imapCommand(`Saving sent copy to "${sent.path}"`, () =>
+      client.append(sent.path, rawMessage, ['\\Seen']),
+    );
+    return sent.path;
   }
 
   // -------------------------------------------------------------------------

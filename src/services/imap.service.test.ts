@@ -756,4 +756,38 @@ describe('ImapService', () => {
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
     });
   });
+
+  // -----------------------------------------------------------------------
+  // appendToSent
+  // -----------------------------------------------------------------------
+
+  describe('appendToSent', () => {
+    const raw = Buffer.from('Subject: Hi\r\n\r\nBody');
+
+    it('appends to the \\Sent special-use folder as read', async () => {
+      client.list.mockResolvedValue([
+        { name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' },
+        { name: 'Gesendete Objekte', path: 'Gesendete Objekte', specialUse: '\\Sent' },
+      ]);
+
+      const mailbox = await service.appendToSent('test', raw);
+
+      expect(mailbox).toBe('Gesendete Objekte');
+      expect(client.append).toHaveBeenCalledWith('Gesendete Objekte', raw, ['\\Seen']);
+    });
+
+    it('falls back to a folder named Sent', async () => {
+      client.list.mockResolvedValue([{ name: 'Sent', path: 'INBOX.Sent' }]);
+
+      expect(await service.appendToSent('test', raw)).toBe('INBOX.Sent');
+      expect(client.append).toHaveBeenCalledWith('INBOX.Sent', raw, ['\\Seen']);
+    });
+
+    it('returns null without appending when there is no Sent folder', async () => {
+      client.list.mockResolvedValue([{ name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' }]);
+
+      expect(await service.appendToSent('test', raw)).toBeNull();
+      expect(client.append).not.toHaveBeenCalled();
+    });
+  });
 });

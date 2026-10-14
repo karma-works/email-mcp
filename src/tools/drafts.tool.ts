@@ -8,6 +8,7 @@ import audit from '../safety/audit.js';
 
 import type ImapService from '../services/imap.service.js';
 import type SmtpService from '../services/smtp.service.js';
+import { formatSentCopy } from './sent-copy.js';
 
 export default function registerDraftTools(
   server: McpServer,
@@ -102,7 +103,7 @@ export default function registerDraftTools(
           content: [
             {
               type: 'text' as const,
-              text: `✅ Draft sent (Message-ID: ${result.messageId}). Draft removed from folder.`,
+              text: `✅ Draft sent (Message-ID: ${result.messageId}). Draft removed from folder.${formatSentCopy(result.sentCopy)}`,
             },
           ],
         };

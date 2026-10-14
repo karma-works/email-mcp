@@ -38,7 +38,13 @@ function createMockRateLimiter(allowed = true) {
 }
 
 function createMockImapService() {
-  return {} as unknown as ImapService;
+  return {
+    appendToSent: vi.fn().mockResolvedValue('Sent'),
+  };
+}
+
+function asImapService(imap: ReturnType<typeof createMockImapService>) {
+  return imap as unknown as ImapService;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,13 +55,15 @@ describe('SmtpService', () => {
   let transport: ReturnType<typeof createMockTransport>;
   let connections: ReturnType<typeof createMockConnectionManager>;
   let rateLimiter: RateLimiter;
+  let imap: ReturnType<typeof createMockImapService>;
   let service: SmtpService;
 
   beforeEach(() => {
     transport = createMockTransport();
     connections = createMockConnectionManager(transport);
     rateLimiter = createMockRateLimiter(true);
-    service = new SmtpService(connections, rateLimiter, createMockImapService());
+    imap = createMockImapService();
+    service = new SmtpService(connections, rateLimiter, asImapService(imap));
   });
 
   describe('sendEmail', () => {
@@ -69,6 +77,7 @@ describe('SmtpService', () => {
       expect(result).toEqual({
         messageId: '<test@example.com>',
         status: 'sent',
+        sentCopy: { status: 'saved', mailbox: 'Sent' },
       });
       expect(transport.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -82,7 +91,7 @@ describe('SmtpService', () => {
 
     it('throws when rate limited', async () => {
       rateLimiter = createMockRateLimiter(false);
-      service = new SmtpService(connections, rateLimiter, createMockImapService());
+      service = new SmtpService(connections, rateLimiter, asImapService(imap));
 
       await expect(
         service.sendEmail('test', {
@@ -123,6 +132,69 @@ describe('SmtpService', () => {
       const call = transport.sendMail.mock.calls[0][0];
       expect(call.html).toBe('<h1>Hello</h1>');
       expect(call.text).toBeUndefined();
+    });
+  });
+
+  describe('Sent copy', () => {
+    it('stores the sent message, including Bcc, in the Sent folder', async () => {
+      await service.sendEmail('test', {
+        from: 'alias@example.org',
+        fromName: 'Alias',
+        to: ['a@example.com'],
+        bcc: ['hidden@example.com'],
+        subject: 'Copy me',
+        body: 'Body',
+      });
+
+      const sent = transport.sendMail.mock.calls[0][0];
+      expect(sent.messageId).toMatch(/^<[0-9a-f-]+@example\.org>$/);
+
+      const raw = imap.appendToSent.mock.calls[0][1].toString();
+      expect(raw).toContain(`Message-ID: ${sent.messageId}`);
+      expect(raw).toContain('From: Alias <alias@example.org>');
+      expect(raw).toContain('Bcc: hidden@example.com');
+      expect(raw).toContain('Subject: Copy me');
+    });
+
+    it('reports a failed copy without failing the send', async () => {
+      imap.appendToSent.mockRejectedValue(new Error('NO [TRYCREATE]'));
+
+      const result = await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result.status).toBe('sent');
+      expect(result.sentCopy).toEqual({ status: 'failed', error: 'NO [TRYCREATE]' });
+    });
+
+    it('reports a missing Sent folder', async () => {
+      imap.appendToSent.mockResolvedValue(null);
+
+      const result = await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result.sentCopy).toEqual({ status: 'skipped', reason: 'no Sent folder found' });
+    });
+
+    it('skips providers that store sent mail themselves', async () => {
+      connections.getAccount.mockReturnValue({
+        ...connections.getAccount('test'),
+        smtp: { host: 'smtp.gmail.com', port: 465, tls: true, starttls: false, verifySsl: true },
+      });
+
+      const result = await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(imap.appendToSent).not.toHaveBeenCalled();
+      expect(result.sentCopy?.status).toBe('skipped');
     });
   });
 });
