@@ -790,4 +790,46 @@ describe('ImapService', () => {
       expect(client.append).not.toHaveBeenCalled();
     });
   });
+  // -----------------------------------------------------------------------
+  // saveDraft
+  // -----------------------------------------------------------------------
+
+  describe('saveDraft', () => {
+    beforeEach(() => {
+      client.list.mockResolvedValue([
+        { name: 'Entwürfe', path: 'Entwürfe', specialUse: '\\Drafts' },
+      ]);
+    });
+
+    function savedRaw(): string {
+      const [, raw] = client.append.mock.calls[0] as [string, Buffer, string[]];
+      return raw.toString('utf-8');
+    }
+
+    it('uses the sender alias and encodes non-ASCII text', async () => {
+      const result = await service.saveDraft('test', {
+        from: 'info@example.org',
+        fromName: 'Beispiel GmbH',
+        to: ['bob@example.com'],
+        subject: 'Auftragsverarbeitungsvertrag für Übermittlung',
+        body: 'Grüße',
+      });
+
+      expect(result).toEqual({ id: 1, mailbox: 'Entwürfe' });
+      expect(client.append).toHaveBeenCalledWith('Entwürfe', expect.any(Buffer), [
+        '\\Draft',
+        '\\Seen',
+      ]);
+      const raw = savedRaw();
+      expect(raw).toContain('From: Beispiel GmbH <info@example.org>');
+      expect(raw).toMatch(/^Subject: =\?UTF-8\?/m);
+      expect(raw).not.toContain('Übermittlung');
+    });
+
+    it('defaults to the account address', async () => {
+      await service.saveDraft('test', { to: [], subject: 'Hi', body: 'Body' });
+
+      expect(savedRaw()).toContain('From: test@example.com');
+    });
+  });
 });

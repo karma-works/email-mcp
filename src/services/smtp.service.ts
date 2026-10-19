@@ -198,7 +198,10 @@ export default class SmtpService {
     const cc = draft.cc?.map((a) => a.address).join(', ');
 
     const result = await this.deliver(accountName, account, {
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      // Keep the sender alias the draft was saved with.
+      from: draft.from?.address
+        ? { address: draft.from.address, name: draft.from.name ?? '' }
+        : this.senderAddress(account, {}),
       to,
       cc,
       subject: draft.subject,

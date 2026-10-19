@@ -26,6 +26,17 @@ export default function registerDraftTools(
         'Save an email draft to the Drafts folder. Compose over time, then use send_draft to send it. Use list_emails with the Drafts mailbox to see saved drafts.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
         to: z
           .array(z.string().email())
           .default([])
@@ -39,9 +50,22 @@ export default function registerDraftTools(
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ account, to, subject, body, cc, bcc, html, in_reply_to: inReplyTo }) => {
+    async ({
+      account,
+      from,
+      fromName,
+      to,
+      subject,
+      body,
+      cc,
+      bcc,
+      html,
+      in_reply_to: inReplyTo,
+    }) => {
       try {
         const result = await imapService.saveDraft(account, {
+          from,
+          fromName,
           to,
           subject,
           body,
@@ -51,7 +75,7 @@ export default function registerDraftTools(
           inReplyTo,
         });
 
-        await audit.log('save_draft', account, { to, subject }, 'ok');
+        await audit.log('save_draft', account, { from, to, subject }, 'ok');
 
         return {
           content: [
