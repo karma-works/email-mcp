@@ -914,7 +914,7 @@ harmless copy → read-back → clear round-trip).
 | `list_scheduled` | List scheduled emails by status |
 | `cancel_scheduled` | Cancel a pending scheduled email |
 
-`send_email`, `reply_email`, and `forward_email` accept optional `from` (a
+`send_email`, `reply_email`, `forward_email`, and `save_draft` accept optional `from` (a
 sender email address) and `fromName` (a display name). Both default to the
 selected account's configured identity. The account still supplies the SMTP
 connection and login; the provider must authorize the chosen sender alias.
@@ -934,8 +934,8 @@ For example, send using an existing account's SMTP login and an authorized alias
 }
 ```
 
-These overrides apply to immediate send, reply, and forward operations;
-`send_draft` and scheduled messages continue to use the account identity.
+A draft keeps its `From` header: `send_draft` sends with the alias the draft
+was saved with. Scheduled messages continue to use the account identity.
 
 #### Manage (7)
 

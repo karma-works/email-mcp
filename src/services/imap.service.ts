@@ -5,6 +5,7 @@
  */
 
 import type { ImapFlow } from 'imapflow';
+import MailComposer from 'nodemailer/lib/mail-composer';
 import type { IConnectionManager } from '../connections/types.js';
 import { sanitizeMailboxName, sanitizeSearchQuery } from '../safety/validation.js';
 import type {
@@ -1206,6 +1207,8 @@ export default class ImapService {
       bcc?: string[];
       html?: boolean;
       inReplyTo?: string;
+      from?: string;
+      fromName?: string;
     },
   ): Promise<{ id: number; mailbox: string }> {
     const client = await this.connections.getImapClient(accountName);
@@ -1216,26 +1219,25 @@ export default class ImapService {
     const drafts = mailboxes.find((mb) => mb.specialUse === '\\Drafts');
     const draftsPath = drafts?.path ?? 'Drafts';
 
-    // Construct RFC 822 message
-    const headers = [
-      `From: ${account.fullName ? `"${account.fullName}" <${account.email}>` : account.email}`,
-      `To: ${options.to.join(', ')}`,
-      `Subject: ${options.subject}`,
-      `Date: ${new Date().toUTCString()}`,
-      `MIME-Version: 1.0`,
-    ];
-
-    if (options.cc?.length) headers.push(`Cc: ${options.cc.join(', ')}`);
-    if (options.bcc?.length) headers.push(`Bcc: ${options.bcc.join(', ')}`);
-    if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
-
-    const contentType = options.html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8';
-    headers.push(`Content-Type: ${contentType}`);
-
-    const rawMessage = `${headers.join('\r\n')}\r\n\r\n${options.body}`;
+    // MailComposer encodes non-ASCII subjects and bodies; a raw header would not.
+    const node = new MailComposer({
+      from: {
+        address: options.from ?? account.email,
+        name: options.fromName ?? account.fullName ?? '',
+      },
+      to: options.to.join(', '),
+      cc: options.cc?.join(', '),
+      bcc: options.bcc?.join(', '),
+      subject: options.subject,
+      inReplyTo: options.inReplyTo,
+      date: new Date(),
+      ...(options.html ? { html: options.body } : { text: options.body }),
+    }).compile();
+    node.keepBcc = true;
+    const rawMessage = await node.build();
 
     const appendResult = await imapCommand(`Saving draft to "${draftsPath}"`, () =>
-      client.append(draftsPath, Buffer.from(rawMessage), ['\\Draft', '\\Seen']),
+      client.append(draftsPath, rawMessage, ['\\Draft', '\\Seen']),
     );
 
     return {
