@@ -914,6 +914,29 @@ harmless copy → read-back → clear round-trip).
 | `list_scheduled` | List scheduled emails by status |
 | `cancel_scheduled` | Cancel a pending scheduled email |
 
+`send_email`, `reply_email`, and `forward_email` accept optional `from` (a
+sender email address) and `fromName` (a display name). Both default to the
+selected account's configured identity. The account still supplies the SMTP
+connection and login; the provider must authorize the chosen sender alias.
+This does not create or verify aliases at the provider. Reply-all excludes both
+the account address and the selected sender alias from the original recipients.
+
+For example, send using an existing account's SMTP login and an authorized alias:
+
+```json
+{
+  "account": "personal",
+  "from": "team@example.com",
+  "fromName": "Example Team",
+  "to": ["recipient@example.net"],
+  "subject": "Project update",
+  "body": "Here is the latest update."
+}
+```
+
+These overrides apply to immediate send, reply, and forward operations;
+`send_draft` and scheduled messages continue to use the account identity.
+
 #### Manage (7)
 
 | Tool | Description |

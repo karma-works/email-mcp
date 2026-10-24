@@ -17,9 +17,21 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
     'send_email',
     {
       title: 'Send email',
-      description: 'Send a new email. Supports plain text or HTML body, CC, and BCC.',
+      description:
+        'Send a new email. Supports plain text or HTML body, CC, BCC, and sender aliases.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
         to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
         subject: z.string().describe('Email subject'),
         body: z.string().describe('Email body content'),
@@ -81,6 +93,17 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
         'Reply to an email with proper threading (In-Reply-To & References headers). Use get_email first to read the original.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
         emailId: z.string().describe('Email ID to reply to (from list_emails or get_email)'),
         mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
         body: z.string().describe('Reply body content'),
@@ -139,6 +162,17 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
         'Forward an email to new recipients with optional additional message. Original email is quoted below.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            'Sender email alias authorized by the SMTP provider (defaults to account email)',
+          ),
+        fromName: z
+          .string()
+          .optional()
+          .describe('Sender display name (defaults to account full name)'),
         emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
         mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
         to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),

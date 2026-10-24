@@ -72,7 +72,7 @@ describe('SmtpService', () => {
       });
       expect(transport.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
-          from: '"Test User" <test@example.com>',
+          from: { address: 'test@example.com', name: 'Test User' },
           to: 'recipient@example.com',
           subject: 'Hello',
           text: 'World',
